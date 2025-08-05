@@ -19,6 +19,7 @@ export async function handleIPCMessage<TRouter extends AnyRouter>({
   message,
   event,
   subscriptions,
+  channel = ELECTRON_TRPC_CHANNEL,  // добавлен параметр
 }: {
   router: TRouter;
   createContext?: (opts: CreateContextOptions) => Promise<inferRouterContext<TRouter>>;
@@ -26,6 +27,7 @@ export async function handleIPCMessage<TRouter extends AnyRouter>({
   message: ETRPCRequest;
   event: IpcMainEvent;
   subscriptions: Map<string, Unsubscribable>;
+  channel?: string;  // добавлен параметр
 }) {
   if (message.method === 'subscription.stop') {
     const subscription = subscriptions.get(internalId);
@@ -47,7 +49,7 @@ export async function handleIPCMessage<TRouter extends AnyRouter>({
 
   const respond = (response: TRPCResponseMessage) => {
     if (event.sender.isDestroyed()) return;
-    event.reply(ELECTRON_TRPC_CHANNEL, transformTRPCResponse(router._def._config, response));
+    event.reply(channel, transformTRPCResponse(router._def._config, response));
   };
 
   try {
@@ -68,13 +70,13 @@ export async function handleIPCMessage<TRouter extends AnyRouter>({
         },
       });
       return;
-    } else {
-      if (!isObservable(result)) {
-        throw new TRPCError({
-          message: `Subscription ${path} did not return an observable`,
-          code: 'INTERNAL_SERVER_ERROR',
-        });
-      }
+    }
+
+    if (!isObservable(result)) {
+      throw new TRPCError({
+        message: `Subscription ${path} did not return an observable`,
+        code: 'INTERNAL_SERVER_ERROR',
+      });
     }
 
     const subscription = result.subscribe({
@@ -127,3 +129,4 @@ export async function handleIPCMessage<TRouter extends AnyRouter>({
     });
   }
 }
+

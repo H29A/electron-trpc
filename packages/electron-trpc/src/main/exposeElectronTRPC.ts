@@ -2,11 +2,16 @@ import { ipcRenderer, contextBridge } from 'electron';
 import { ELECTRON_TRPC_CHANNEL } from '../constants';
 import type { RendererGlobalElectronTRPC } from '../types';
 
-export const exposeElectronTRPC = () => {
+export const exposeElectronTRPC = (channel = ELECTRON_TRPC_CHANNEL) => {
   const electronTRPC: RendererGlobalElectronTRPC = {
-    sendMessage: (operation) => ipcRenderer.send(ELECTRON_TRPC_CHANNEL, operation),
+    sendMessage: (operation) => ipcRenderer.send(channel, operation),
     onMessage: (callback) =>
-      ipcRenderer.on(ELECTRON_TRPC_CHANNEL, (_event, args) => callback(args)),
+      ipcRenderer.on(channel, (_event, args) => callback(args)),
   };
-  contextBridge.exposeInMainWorld('electronTRPC', electronTRPC);
+
+  if (channel === ELECTRON_TRPC_CHANNEL) {
+    contextBridge.exposeInMainWorld('electronTRPC', electronTRPC);
+  } else {
+    contextBridge.exposeInMainWorld('electronTRPC_' + channel, electronTRPC);
+  }
 };

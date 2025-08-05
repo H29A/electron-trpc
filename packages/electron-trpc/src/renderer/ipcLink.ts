@@ -5,6 +5,7 @@ import type { RendererGlobalElectronTRPC } from '../types';
 import { observable, Observer } from '@trpc/server/observable';
 import { transformResult } from './utils';
 import debugFactory from 'debug';
+import { ELECTRON_TRPC_CHANNEL } from '../constants';
 
 const debug = debugFactory('electron-trpc:renderer:ipcLink');
 
@@ -24,13 +25,23 @@ type IPCRequest = {
   op: Operation;
 };
 
-const getElectronTRPC = () => {
-  const electronTRPC: RendererGlobalElectronTRPC = (globalThis as any).electronTRPC;
+const getElectronTRPC = (channel: string) => {
+  let electronTRPC: RendererGlobalElectronTRPC;
 
-  if (!electronTRPC) {
-    throw new Error(
-      'Could not find `electronTRPC` global. Check that `exposeElectronTRPC` has been called in your preload file.'
-    );
+  if (channel === ELECTRON_TRPC_CHANNEL) {
+    electronTRPC = (globalThis as any).electronTRPC;
+    if (!electronTRPC) {
+      throw new Error(
+        'Could not find `electronTRPC` global. Check that exposeElectronTRPC() has been called in your preload file.'
+      );
+    }
+  } else {
+    electronTRPC = (globalThis as any)['electronTRPC_' + channel];
+    if (!electronTRPC) {
+      throw new Error(
+        `Could not find \`electronTRPC_${channel}\` global. Check that exposeElectronTRPC('${channel}') has been called in your preload file.`
+      );
+    }
   }
 
   return electronTRPC;
@@ -38,9 +49,11 @@ const getElectronTRPC = () => {
 
 class IPCClient {
   #pendingRequests = new Map<string | number, IPCRequest>();
-  #electronTRPC = getElectronTRPC();
+  #electronTRPC: RendererGlobalElectronTRPC;
 
-  constructor() {
+  constructor({ channel }: { channel: string }) {
+    this.#electronTRPC = getElectronTRPC(channel);
+
     this.#electronTRPC.onMessage((response: TRPCResponseMessage) => {
       this.#handleResponse(response);
     });
@@ -88,9 +101,9 @@ class IPCClient {
   }
 }
 
-export function ipcLink<TRouter extends AnyRouter>(): TRPCLink<TRouter> {
+export function ipcLink<TRouter extends AnyRouter>(channel: string = ELECTRON_TRPC_CHANNEL): TRPCLink<TRouter> {
   return (runtime) => {
-    const client = new IPCClient();
+    const client = new IPCClient({ channel });
 
     return ({ op }) => {
       return observable((observer) => {
