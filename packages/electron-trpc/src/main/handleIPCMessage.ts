@@ -48,8 +48,13 @@ export async function handleIPCMessage<TRouter extends AnyRouter>({
   const ctx = (await createContext?.({ event })) ?? {};
 
   const respond = (response: TRPCResponseMessage) => {
-    if (event.sender.isDestroyed()) return;
-    event.reply(channel, transformTRPCResponse(router._def._config, response));
+    try {
+      if (event.sender.isDestroyed()) return;
+      event.reply(channel, transformTRPCResponse(router._def._config, response));
+    } catch (error) {
+      // WebContents уже уничтожен, игнорируем
+      debug('Failed to send response, webContents likely destroyed:', error.message);
+    }
   };
 
   try {

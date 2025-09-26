@@ -1,5 +1,5 @@
 import type { AnyRouter, inferRouterContext } from '@trpc/server';
-import { ipcMain, BrowserWindow }from 'electron';
+import { ipcMain, BrowserWindow } from 'electron';
 import type { IpcMainEvent, WebContents } from 'electron';
 import { handleIPCMessage } from './handleIPCMessage';
 import { CreateContextOptions } from './types';
@@ -54,7 +54,15 @@ class IPCHandler<TRouter extends AnyRouter> {
   }
 
   attachWebContents(wc: WebContents) {
-    if (this.#webContents.includes(wc)) {
+    if (
+      this.#webContents.some((existingWc) => {
+        try {
+          return existingWc.id === wc.id;
+        } catch {
+          return false;
+        }
+      })
+    ) {
       return;
     }
 
@@ -64,17 +72,38 @@ class IPCHandler<TRouter extends AnyRouter> {
     this.#attachSubscriptionCleanupHandlers(wc);
   }
 
-  detachWebContents(wc: WebContents, webContentsId: number) {
-    debug('Detaching webContents', wc.id);
+  // Метод для безопасного отключения по ID (для runtime случаев)
+  detachWebContentsById(webContentsId: number) {
+    debug('Detaching webContents by ID', webContentsId);
 
-    const win = BrowserWindow.fromWebContents(wc);
+    this.#webContents = this.#webContents.filter((wc) => {
+      try {
+        return wc.id !== webContentsId && !wc.isDestroyed();
+      } catch (error) {
+        return false;
+      }
+    });
 
-    if (win?.isDestroyed() && webContentsId === undefined) {
-      throw new Error('webContentsId is required when calling detachWindow on a destroyed window');
-    }
+    this.#cleanUpSubscriptions({ webContentsId });
+  }
 
-    this.#webContents = this.#webContents.filter((wc) => BrowserWindow.fromWebContents(wc) !== null && BrowserWindow.fromWebContents(wc) !== win);
-    this.#cleanUpSubscriptions({ webContentsId: webContentsId });
+  detachWebContents(wc: WebContents, webContentsId?: number) {
+    debug('Detaching webContents', webContentsId || wc.id);
+
+    // Для BrowserView используем webContentsId напрямую
+    const actualWebContentsId = webContentsId || wc.id;
+
+    // Фильтруем по ID вместо сравнения BrowserWindow
+    this.#webContents = this.#webContents.filter((existingWc) => {
+      try {
+        return existingWc.id !== actualWebContentsId && !existingWc.isDestroyed();
+      } catch (error) {
+        // WebContents уже уничтожен, исключаем из списка
+        return false;
+      }
+    });
+
+    this.#cleanUpSubscriptions({ webContentsId: actualWebContentsId });
   }
 
   #cleanUpSubscriptions({
@@ -98,14 +127,7 @@ class IPCHandler<TRouter extends AnyRouter> {
 
     wc.on(
       'did-start-navigation',
-      (
-        _event,
-        _url,
-        isInPlace: boolean,
-        _isMainFrame,
-        _frameProcessId,
-        frameRoutingId
-      ) => {
+      (_event, _url, isInPlace: boolean, _isMainFrame, _frameProcessId, frameRoutingId) => {
         // Check if it's a hard navigation
         if (!isInPlace) {
           debug(
@@ -120,12 +142,14 @@ class IPCHandler<TRouter extends AnyRouter> {
         }
       }
     );
-  
+
     wc.on('destroyed', () => {
-      debug('Handling webContents `destroyed` event');
-      const win = BrowserWindow.fromWebContents(wc);
-      if (win) {
+      debug('Handling webContents `destroyed` event', webContentsId);
+      // Всегда вызываем detachWebContents для BrowserView и BrowserWindow
+      try {
         this.detachWebContents(wc, webContentsId);
+      } catch (error) {
+        debug('Error during webContents cleanup:', error);
       }
     });
   }
